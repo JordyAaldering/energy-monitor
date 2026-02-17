@@ -29,7 +29,7 @@ fn main() -> eframe::Result {
 struct App {
     last_delta: Instant,
     last_fixed: Instant,
-    rapl: Rapl,
+    rapl: Option<Rapl>,
     window: [f32; WINDOW_ELEMS],
     window_idx: usize,
     idle_w: f32,
@@ -38,12 +38,10 @@ struct App {
 
 impl Default for App {
     fn default() -> Self {
-        let rapl = Rapl::now(false).unwrap();
-        println!("Found {} RAPL packages", rapl.packages.len());
         Self {
             last_delta: Instant::now(),
             last_fixed: Instant::now(),
-            rapl,
+            rapl: Rapl::now(false),
             window: [f32::MIN; WINDOW_ELEMS],
             window_idx: 0,
             idle_w: f32::MAX,
@@ -72,15 +70,17 @@ impl eframe::App for App {
 
 impl App {
     fn fixed_update(&mut self, fixed_time: Duration) {
-        let power = self.rapl.elapsed().into_values().sum::<f32>() / fixed_time.as_secs_f32();
+        if let Some(rapl) = &mut self.rapl {
+            let power = rapl.elapsed().into_values().sum::<f32>() / fixed_time.as_secs_f32();
 
-        self.window[self.window_idx] = power;
-        self.window_idx = (self.window_idx + 1) % WINDOW_ELEMS;
+            self.window[self.window_idx] = power;
+            self.window_idx = (self.window_idx + 1) % WINDOW_ELEMS;
 
-        self.idle_w = self.idle_w.min(power);
-        self.max_w = self.max_w.max(power);
+            self.idle_w = self.idle_w.min(power);
+            self.max_w = self.max_w.max(power);
 
-        self.rapl.reset();
+            rapl.reset();
+        }
     }
 
     fn render(&mut self, ctx: &egui::Context, delta_time: Duration) {
@@ -89,13 +89,15 @@ impl App {
         egui::SidePanel::right("stats_panel")
             .default_width(200.0)
             .show(ctx, |ui| {
-                ui.label(format!("{:.1} FPS", 1.0 / delta_time.as_secs_f32()));
+                ui.label(format!("{} FPS", (1.0 / delta_time.as_secs_f32()).round() as u32));
 
-                ui.label(format!("Idle: {:.2}W", self.idle_w));
+                ui.label(format!("Found {} RAPL packages", self.rapl.as_ref().map_or(0, |rapl| rapl.packages.len())));
 
-                ui.label(format!("Window max: {:.2}W", window_max));
+                ui.label(format!("Idle: {:.1}W", self.idle_w));
 
-                ui.label(format!("Overall max: {:.2}W", self.max_w));
+                ui.label(format!("Window max: {:.1}W", window_max));
+
+                ui.label(format!("Overall max: {:.1}W", self.max_w));
             });
 
         egui::CentralPanel::default()
