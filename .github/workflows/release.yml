@@ -14,7 +14,7 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.platform.target }}
+    name: Build ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
 
     strategy:
@@ -120,7 +120,7 @@ jobs:
         run: |
           BINARY_NAME="${{ steps.binary_name.outputs.name }}"
           BINARY_PATH="target/${{ matrix.platform.target }}/release/${BINARY_NAME}${{ matrix.platform.binary_ext }}"
-          ARCHIVE_NAME="${BINARY_NAME}-${{ matrix.platform.target }}"
+          ARCHIVE_NAME="${BINARY_NAME}-${{ matrix.platform.name }}"
 
           mkdir -p dist
 
@@ -133,7 +133,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ steps.binary_name.outputs.name }}-${{ matrix.platform.target }}
+          name: ${{ steps.binary_name.outputs.name }}-${{ matrix.platform.name }}
           path: dist/*
           if-no-files-found: error
 
