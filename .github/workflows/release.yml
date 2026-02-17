@@ -7,14 +7,13 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    name: Build ${{ matrix.platform.name }}
+    name: Build ${{ matrix.platform.target }}
     runs-on: ${{ matrix.platform.os }}
 
     strategy:
@@ -120,7 +119,7 @@ jobs:
         run: |
           BINARY_NAME="${{ steps.binary_name.outputs.name }}"
           BINARY_PATH="target/${{ matrix.platform.target }}/release/${BINARY_NAME}${{ matrix.platform.binary_ext }}"
-          ARCHIVE_NAME="${BINARY_NAME}-${{ matrix.platform.name }}"
+          ARCHIVE_NAME="${BINARY_NAME}-${{ matrix.platform.target }}"
 
           mkdir -p dist
 
@@ -133,7 +132,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ steps.binary_name.outputs.name }}-${{ matrix.platform.name }}
+          name: ${{ steps.binary_name.outputs.name }}-${{ matrix.platform.target }}
           path: dist/*
           if-no-files-found: error
 

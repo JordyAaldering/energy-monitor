@@ -105,7 +105,8 @@ impl App {
 
                     let offset_x = x as f64 * FIXED_UPDATE_SEC;
                     let idle_j = self.idle_w as f64 * FIXED_UPDATE_SEC;
-                    [offset_x, self.window[offset_idx] as f64 - idle_j]
+                    let energy = self.window[offset_idx] as f64 - idle_j;
+                    [offset_x, energy]
                 }).collect();
 
                 let line = egui_plot::Line::new("energy_line", data);
