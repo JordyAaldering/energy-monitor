@@ -30,7 +30,7 @@ struct App {
     last_delta: Instant,
     last_fixed: Instant,
     rapl: Option<Rapl>,
-    window: [f32; WINDOW_ELEMS],
+    cpu_power: [f32; WINDOW_ELEMS],
     window_idx: usize,
     idle_w: f32,
     max_w: f32,
@@ -42,7 +42,7 @@ impl Default for App {
             last_delta: Instant::now(),
             last_fixed: Instant::now(),
             rapl: Rapl::now(false),
-            window: [f32::MIN; WINDOW_ELEMS],
+            cpu_power: [f32::MIN; WINDOW_ELEMS],
             window_idx: 0,
             idle_w: f32::MAX,
             max_w: 0.0,
@@ -57,7 +57,8 @@ impl eframe::App for App {
         let fixed_time = now.duration_since(self.last_fixed);
         self.last_delta = now;
 
-        if fixed_time >= FIXED_UPDATE_DURATION {
+        let first_iteration = self.idle_w == f32::MAX;
+        if fixed_time >= FIXED_UPDATE_DURATION || first_iteration {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
         }
@@ -71,9 +72,10 @@ impl eframe::App for App {
 impl App {
     fn fixed_update(&mut self, fixed_time: Duration) {
         if let Some(rapl) = &mut self.rapl {
-            let power = rapl.elapsed().into_values().sum::<f32>() / fixed_time.as_secs_f32();
+            let energy = rapl.elapsed().into_values().sum::<f32>();
+            let power = energy / fixed_time.as_secs_f32();
 
-            self.window[self.window_idx] = power;
+            self.cpu_power[self.window_idx] = power;
             self.window_idx = (self.window_idx + 1) % WINDOW_ELEMS;
 
             self.idle_w = self.idle_w.min(power);
@@ -84,34 +86,38 @@ impl App {
     }
 
     fn render(&mut self, ctx: &egui::Context, delta_time: Duration) {
-        let window_max = self.window.iter().cloned().fold(f32::MIN, f32::max);
+        let cpu_power_max = self.cpu_power.iter().fold(0.0, |x, y| y.max(x));
+        let window_max = cpu_power_max - self.idle_w;
 
         egui::SidePanel::right("stats_panel")
             .default_width(200.0)
             .show(ctx, |ui| {
-                ui.label(format!("{} FPS", (1.0 / delta_time.as_secs_f32()).round() as u32));
-
                 ui.label(format!("Found {} RAPL packages", self.rapl.as_ref().map_or(0, |rapl| rapl.packages.len())));
-
+                ui.label(format!("{} FPS", (1.0 / delta_time.as_secs_f32()).round() as u32));
                 ui.label(format!("Idle: {:.1}W", self.idle_w));
-
                 ui.label(format!("Window max: {:.1}W", window_max));
+                ui.label(format!("Overall max: {:.1}W", self.max_w - self.idle_w));
 
-                ui.label(format!("Overall max: {:.1}W", self.max_w));
+                if ui.button("reset").clicked() {
+                    self.cpu_power = [f32::MIN; WINDOW_ELEMS];
+                    self.window_idx = 0;
+                    self.idle_w = f32::MAX;
+                    self.max_w = 0.0;
+                }
             });
 
         egui::CentralPanel::default()
             .show(ctx, |ui| {
                 let data: egui_plot::PlotPoints = (0..WINDOW_ELEMS).map(|x| {
-                    let offset_idx = (WINDOW_ELEMS - x + self.window_idx - 1) % WINDOW_ELEMS;
-
-                    let offset_x = x as f64 * FIXED_UPDATE_SEC;
-                    let idle_j = self.idle_w as f64 * FIXED_UPDATE_SEC;
-                    let energy = self.window[offset_idx] as f64 - idle_j;
-                    [offset_x, energy]
+                    // Map [0,WINDOW_ELEMS) to (WINDOW_ELEMS,0]
+                    let x_inv = WINDOW_ELEMS - x - 1;
+                    let idx_offset = (x_inv + self.window_idx) % WINDOW_ELEMS;
+                    let power = self.cpu_power[idx_offset] - self.idle_w;
+                    [x as f64 * FIXED_UPDATE_SEC, power as f64]
                 }).collect();
 
                 let line = egui_plot::Line::new("energy_line", data);
+
                 egui_plot::Plot::new("energy_plot")
                     .allow_drag(false)
                     .allow_zoom(false)
