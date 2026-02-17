@@ -86,7 +86,7 @@ impl App {
     fn render(&mut self, ctx: &egui::Context, delta_time: Duration) {
         let window_max = self.window.iter().cloned().fold(f32::MIN, f32::max);
 
-        egui::SidePanel::right("stats")
+        egui::SidePanel::right("stats_panel")
             .default_width(200.0)
             .show(ctx, |ui| {
                 ui.label(format!("{:.1} FPS", 1.0 / delta_time.as_secs_f32()));
@@ -108,7 +108,7 @@ impl App {
                     [offset_x, self.window[offset_idx] as f64 - idle_j]
                 }).collect();
 
-                let line = egui_plot::Line::new("energy", data);
+                let line = egui_plot::Line::new("energy_line", data);
                 egui_plot::Plot::new("energy_plot")
                     .allow_drag(false)
                     .allow_zoom(false)
