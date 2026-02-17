@@ -3,6 +3,13 @@ name = "energy-monitor"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+opt-level = "s"
+strip = "debuginfo"
+lto = "thin"
+panic = "abort"
+codegen-units = 1
+
 [dependencies]
 eframe = "0.33.3"
 egui = "0.33.3"
