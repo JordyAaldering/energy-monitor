@@ -1,5 +1,7 @@
-use std::{f32, time::{Duration, Instant}};
+use std::{f32, fs::File, io::{BufWriter, Write}, time::{Duration, Instant}};
 
+use eframe::egui;
+use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
 
 const FIXED_UPDATE_MS: usize = 100;
@@ -27,6 +29,9 @@ fn main() -> eframe::Result {
 }
 
 struct App {
+    file_dialog: FileDialog,
+    opened_file: Option<BufWriter<File>>,
+
     last_delta: Instant,
     last_fixed: Instant,
     rapl: Option<Rapl>,
@@ -39,6 +44,8 @@ struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
+            file_dialog: FileDialog::new().allow_file_overwrite(false),
+            opened_file: None,
             last_delta: Instant::now(),
             last_fixed: Instant::now(),
             rapl: Rapl::now(false),
@@ -75,6 +82,10 @@ impl App {
             let energy = rapl.elapsed().into_values().sum::<f32>();
             let power = energy / fixed_time.as_secs_f32();
 
+            if let Some(wtr) = self.opened_file.as_mut() {
+                writeln!(wtr, "{}", power).unwrap();
+            }
+
             self.cpu_power[self.window_idx] = power;
             self.window_idx = (self.window_idx + 1) % WINDOW_ELEMS;
 
@@ -88,6 +99,28 @@ impl App {
     fn render(&mut self, ctx: &egui::Context, delta_time: Duration) {
         let cpu_power_max = self.cpu_power.iter().fold(0.0, |x, y| y.max(x));
         let window_max = cpu_power_max - self.idle_w;
+
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("New").clicked() {
+                        self.file_dialog.save_file();
+                    }
+
+                    if ui.button("Close").clicked() {
+                        if let Some(mut file) = self.opened_file.take() {
+                            file.flush().unwrap();
+                        }
+                    }
+                });
+            }); 
+        });
+
+        self.file_dialog.update(ctx);
+        if let Some(path) = self.file_dialog.take_picked() {
+            let file = File::create_new(path).unwrap();
+            self.opened_file = Some(BufWriter::new(file));
+        }
 
         egui::SidePanel::right("stats_panel")
             .default_width(200.0)

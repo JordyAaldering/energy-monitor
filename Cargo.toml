@@ -12,6 +12,6 @@ codegen-units = 1
 
 [dependencies]
 eframe = "0.33.3"
-egui = "0.33.3"
+egui-file-dialog = "0.12.0"
 egui_plot = "0.34.1"
-rapl-energy = "0.1.24"
+rapl-energy = "0.1.25"
