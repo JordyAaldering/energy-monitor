@@ -12,26 +12,9 @@ const WINDOW_SEC: usize = 60;
 const WINDOW_DURATION: Duration = Duration::from_secs(WINDOW_SEC as u64);
 const WINDOW_ELEMS: usize = (WINDOW_SEC * 1000) / FIXED_UPDATE_MS + 1;
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 720.0]),
-        vsync: true,
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "Energy Monitor",
-        options,
-        Box::new(|_cc| {
-            Ok(Box::<App>::default())
-        }),
-    )
-}
-
 struct App {
     file_dialog: FileDialog,
     opened_file: Option<BufWriter<File>>,
-
     last_delta: Instant,
     last_fixed: Instant,
     rapl: Option<Rapl>,
@@ -169,4 +152,17 @@ impl App {
                     });
             });
     }
+}
+
+fn main() -> eframe::Result {
+    eframe::run_native(
+        "Energy Monitor",
+        eframe::NativeOptions {
+            vsync: true,
+            ..Default::default()
+        },
+        Box::new(|_| {
+            Ok(Box::<App>::default())
+        }),
+    )
 }
