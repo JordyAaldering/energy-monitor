@@ -21,7 +21,6 @@ struct App {
     cpu_power: [f32; WINDOW_ELEMS],
     window_idx: usize,
     idle_w: f32,
-    max_w: f32,
 }
 
 impl Default for App {
@@ -35,7 +34,6 @@ impl Default for App {
             cpu_power: [f32::MIN; WINDOW_ELEMS],
             window_idx: 0,
             idle_w: f32::MAX,
-            max_w: 0.0,
         }
     }
 }
@@ -73,7 +71,6 @@ impl App {
             self.window_idx = (self.window_idx + 1) % WINDOW_ELEMS;
 
             self.idle_w = self.idle_w.min(power);
-            self.max_w = self.max_w.max(power);
 
             rapl.reset();
         }
@@ -103,7 +100,6 @@ impl App {
                     self.cpu_power = [f32::MIN; WINDOW_ELEMS];
                     self.window_idx = 0;
                     self.idle_w = f32::MAX;
-                    self.max_w = 0.0;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
