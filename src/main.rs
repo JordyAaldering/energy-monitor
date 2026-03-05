@@ -4,19 +4,20 @@ use eframe::egui;
 use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
 
-const FIXED_UPDATE_MS: usize = 100;
-const FIXED_UPDATE_SEC: f64 = FIXED_UPDATE_MS as f64 * 0.001;
-const FIXED_UPDATE_DURATION: Duration = Duration::from_millis(FIXED_UPDATE_MS as u64);
+// const FIXED_UPDATE_MS: usize = 100;
+// const FIXED_UPDATE_SEC: f64 = FIXED_UPDATE_MS as f64 * 0.001;
+// const FIXED_UPDATE_DURATION: Duration = Duration::from_millis(FIXED_UPDATE_MS as u64);
 
 const WINDOW_SEC: usize = 60;
 const WINDOW_DURATION: Duration = Duration::from_secs(WINDOW_SEC as u64);
-const WINDOW_ELEMS: usize = (WINDOW_SEC * 1000) / FIXED_UPDATE_MS + 1;
+const WINDOW_ELEMS: usize = (WINDOW_SEC * 1000) / /*FIXED_UPDATE_MS*/ 10 + 1;
 
 struct App {
     file_dialog: FileDialog,
     opened_file: Option<BufWriter<File>>,
     last_delta: Instant,
     last_fixed: Instant,
+    fixed_update_hz: usize,
     rapl: Option<Rapl>,
     cpu_power: [f32; WINDOW_ELEMS],
     window_idx: usize,
@@ -30,6 +31,7 @@ impl Default for App {
             opened_file: None,
             last_delta: Instant::now(),
             last_fixed: Instant::now(),
+            fixed_update_hz: 10,
             rapl: Rapl::now(false),
             cpu_power: [f32::MIN; WINDOW_ELEMS],
             window_idx: 0,
@@ -40,20 +42,28 @@ impl Default for App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let fixed_update_dur = Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
+
         let now = Instant::now();
         let delta_time = now.duration_since(self.last_delta);
         let fixed_time = now.duration_since(self.last_fixed);
         self.last_delta = now;
 
         let first_iteration = self.idle_w == f32::MAX;
-        if first_iteration || fixed_time >= FIXED_UPDATE_DURATION {
+        if first_iteration || fixed_time >= fixed_update_dur {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
         }
 
         self.render(ctx, delta_time);
 
-        ctx.request_repaint_after(FIXED_UPDATE_DURATION);
+        ctx.request_repaint_after(fixed_update_dur);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Some(mut file) = self.opened_file.take() {
+            file.flush().unwrap();
+        }
     }
 }
 
@@ -96,6 +106,10 @@ impl App {
                     }
                 });
 
+                ui.menu_button("Settings", |ui| {
+                    ui.add(egui::Slider::new(&mut self.fixed_update_hz, 1..=120).text("FixedUpdate (Hz)"));
+                });
+
                 if ui.button("Reset").clicked() {
                     self.cpu_power = [f32::MIN; WINDOW_ELEMS];
                     self.window_idx = 0;
@@ -131,7 +145,7 @@ impl App {
                     let x_inv = WINDOW_ELEMS - x - 1;
                     let idx_offset = (x_inv + self.window_idx) % WINDOW_ELEMS;
                     let power = self.cpu_power[idx_offset] - self.idle_w;
-                    [x as f64 * FIXED_UPDATE_SEC, power as f64]
+                    [x as f64 / self.fixed_update_hz as f64, power as f64]
                 }).collect();
 
                 let line = egui_plot::Line::new("energy_line", data);
