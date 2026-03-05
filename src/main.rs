@@ -65,7 +65,7 @@ impl eframe::App for App {
         self.last_delta = now;
 
         let first_iteration = self.idle_w == f32::MAX;
-        if fixed_time >= FIXED_UPDATE_DURATION || first_iteration {
+        if first_iteration || fixed_time >= FIXED_UPDATE_DURATION {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
         }
@@ -102,6 +102,8 @@ impl App {
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
+                egui::global_theme_preference_switch(ui);
+
                 ui.menu_button("File", |ui| {
                     if ui.button("New").clicked() {
                         self.file_dialog.save_file();
@@ -113,7 +115,18 @@ impl App {
                         }
                     }
                 });
-            }); 
+
+                if ui.button("Reset").clicked() {
+                    self.cpu_power = [f32::MIN; WINDOW_ELEMS];
+                    self.window_idx = 0;
+                    self.idle_w = f32::MAX;
+                    self.max_w = 0.0;
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0} FPS", 1.0 / delta_time.as_secs_f32()));
+                });
+            });
         });
 
         self.file_dialog.update(ctx);
@@ -122,22 +135,15 @@ impl App {
             self.opened_file = Some(BufWriter::new(file));
         }
 
-        egui::SidePanel::right("stats_panel")
-            .default_width(200.0)
-            .show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("stats_bar").show(ctx, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.label(format!("Found {} RAPL packages", self.rapl.as_ref().map_or(0, |rapl| rapl.packages.len())));
-                ui.label(format!("{} FPS", (1.0 / delta_time.as_secs_f32()).round() as u32));
-                ui.label(format!("Idle: {:.1}W", self.idle_w));
-                ui.label(format!("Window max: {:.1}W", window_max));
-                ui.label(format!("Overall max: {:.1}W", self.max_w - self.idle_w));
 
-                if ui.button("reset").clicked() {
-                    self.cpu_power = [f32::MIN; WINDOW_ELEMS];
-                    self.window_idx = 0;
-                    self.idle_w = f32::MAX;
-                    self.max_w = 0.0;
-                }
+                ui.separator();
+
+                ui.label(format!("Idle: {:.1}W", self.idle_w));
             });
+        });
 
         egui::CentralPanel::default()
             .show(ctx, |ui| {
