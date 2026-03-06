@@ -162,6 +162,9 @@ impl App {
             .show(ctx, |ui| {
                 let window_elems = window_capacity(self.window_sec, self.fixed_update_hz);
 
+                // TODO: I think we can just create plot_points at the same time as cpu_power and then update in-place
+                // Then instead of splicing the array here, we might be better off just creating two lines (or combining two splices?) in `show`
+
                 self.plot_points.clear();
                 self.plot_points.reserve(window_elems);
                 for x in 0..window_elems {
