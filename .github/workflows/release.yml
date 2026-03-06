@@ -55,12 +55,12 @@ jobs:
           #   binary_ext: ".exe"
           #   use_cross: false
 
-          - name: MacOS x86_64
-            glob: macos-x86-64
-            os: macos-latest
-            target: x86_64-apple-darwin
-            binary_ext: ""
-            use_cross: false
+          # - name: MacOS x86_64
+          #   glob: macos-x86-64
+          #   os: macos-latest
+          #   target: x86_64-apple-darwin
+          #   binary_ext: ""
+          #   use_cross: false
 
           # - name: MacOS ARM64
           #   glob: macos-arm64
