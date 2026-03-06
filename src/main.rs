@@ -19,8 +19,9 @@ struct App {
     last_fixed: Instant,
     window_sec: usize,
     fixed_update_hz: usize,
-    cpu_power: Vec<f32>,
     window_idx: usize,
+    cpu_power: Vec<f32>,
+    plot_points: Vec<egui_plot::PlotPoint>,
     rapl: Option<Rapl>,
     idle_w: f32,
 }
@@ -34,8 +35,9 @@ impl Default for App {
             last_fixed: Instant::now(),
             window_sec: 120,
             fixed_update_hz: 10,
-            cpu_power: vec![0.0; window_capacity(120, 10)],
             window_idx: 0,
+            cpu_power: vec![0.0; window_capacity(120, 10)],
+            plot_points: Vec::new(),
             rapl: Rapl::now(false),
             idle_w: f32::MAX,
         }
@@ -112,9 +114,9 @@ impl App {
                     let mut window_sec = self.window_sec;
                     let mut fixed_update_hz = self.fixed_update_hz;
 
-                    let resp0 = ui.add(egui::Slider::new(&mut window_sec, 10..=120).text("Window (sec)"));
+                    let resp0 = ui.add(egui::Slider::new(&mut window_sec, 10..=240).step_by(10.0).text("Window (sec)"));
 
-                    let resp1 = ui.add(egui::Slider::new(&mut fixed_update_hz, 1..=120).text("Update (Hz)"));
+                    let resp1 = ui.add(egui::Slider::new(&mut fixed_update_hz, 1..=60).text("Update (Hz)"));
 
                     if window_sec != self.window_sec || fixed_update_hz != self.fixed_update_hz {
                         ui.label("Release to update");
@@ -129,9 +131,9 @@ impl App {
                 });
 
                 if ui.button("Reset").clicked() {
+                    self.idle_w = f32::MAX;
                     self.cpu_power = vec![0.0; window_capacity(self.window_sec, self.fixed_update_hz)];
                     self.window_idx = 0;
-                    self.idle_w = f32::MAX;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -158,16 +160,21 @@ impl App {
 
         egui::CentralPanel::default()
             .show(ctx, |ui| {
-                let window_elems = self.cpu_power.capacity();
-                let data: egui_plot::PlotPoints = (0..window_elems).map(|x| {
-                    // Map [0,WINDOW_ELEMS) to (WINDOW_ELEMS,0]
+                let window_elems = window_capacity(self.window_sec, self.fixed_update_hz);
+
+                self.plot_points.clear();
+                self.plot_points.reserve(window_elems);
+                for x in 0..window_elems {
+                    // Map [0,window_elems) to (window_elems,0]
                     let x_inv = window_elems - x - 1;
                     let idx_offset = (x_inv + self.window_idx) % window_elems;
                     let power = self.cpu_power[idx_offset] - self.idle_w;
-                    [x as f64 / self.fixed_update_hz as f64, power as f64]
-                }).collect();
 
-                let line = egui_plot::Line::new("energy_line", data);
+                    self.plot_points.push(egui_plot::PlotPoint::new(
+                        x as f64 / self.fixed_update_hz as f64,
+                        power as f64,
+                    ));
+                }
 
                 egui_plot::Plot::new("energy_plot")
                     .allow_drag(false)
@@ -177,7 +184,8 @@ impl App {
                     .default_x_bounds(0f64, self.window_sec as f64)
                     .default_y_bounds(0f64, (window_max as f64 * 1.1).max(1.0))
                     .show(ui, |plot_ui| {
-                        plot_ui.line(line);
+                        let points = egui_plot::PlotPoints::Borrowed(&self.plot_points);
+                        plot_ui.line(egui_plot::Line::new("energy_line", points));
                     });
             });
     }
