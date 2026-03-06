@@ -187,6 +187,7 @@ impl App {
     }
 }
 
+#[inline(always)]
 fn window_capacity(window_sec: usize, fixed_update_hz: usize) -> usize {
     // Every second gets `fixed_update_hz` many updates
     // Both ends are inclusive, so add one
