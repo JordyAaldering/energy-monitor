@@ -8,19 +8,20 @@ use rapl_energy::Rapl;
 // const FIXED_UPDATE_SEC: f64 = FIXED_UPDATE_MS as f64 * 0.001;
 // const FIXED_UPDATE_DURATION: Duration = Duration::from_millis(FIXED_UPDATE_MS as u64);
 
-const WINDOW_SEC: usize = 60;
-const WINDOW_DURATION: Duration = Duration::from_secs(WINDOW_SEC as u64);
-const WINDOW_ELEMS: usize = (WINDOW_SEC * 1000) / /*FIXED_UPDATE_MS*/ 10 + 1;
+// const WINDOW_SEC: usize = 60;
+// const WINDOW_DURATION: Duration = Duration::from_secs(WINDOW_SEC as u64);
+// const WINDOW_ELEMS: usize = (WINDOW_SEC * 1000) / /*FIXED_UPDATE_MS*/ 10 + 1;
 
 struct App {
     file_dialog: FileDialog,
     opened_file: Option<BufWriter<File>>,
     last_delta: Instant,
     last_fixed: Instant,
+    window_sec: usize,
     fixed_update_hz: usize,
-    rapl: Option<Rapl>,
-    cpu_power: [f32; WINDOW_ELEMS],
+    cpu_power: Vec<f32>,
     window_idx: usize,
+    rapl: Option<Rapl>,
     idle_w: f32,
 }
 
@@ -31,10 +32,11 @@ impl Default for App {
             opened_file: None,
             last_delta: Instant::now(),
             last_fixed: Instant::now(),
+            window_sec: 120,
             fixed_update_hz: 10,
-            rapl: Rapl::now(false),
-            cpu_power: [f32::MIN; WINDOW_ELEMS],
+            cpu_power: vec![0.0; window_capacity(120, 10)],
             window_idx: 0,
+            rapl: Rapl::now(false),
             idle_w: f32::MAX,
         }
     }
@@ -78,7 +80,7 @@ impl App {
             }
 
             self.cpu_power[self.window_idx] = power;
-            self.window_idx = (self.window_idx + 1) % WINDOW_ELEMS;
+            self.window_idx = (self.window_idx + 1) % self.cpu_power.capacity();
 
             self.idle_w = self.idle_w.min(power);
 
@@ -107,11 +109,27 @@ impl App {
                 });
 
                 ui.menu_button("Settings", |ui| {
-                    ui.add(egui::Slider::new(&mut self.fixed_update_hz, 1..=120).text("FixedUpdate (Hz)"));
+                    let mut window_sec = self.window_sec;
+                    let mut fixed_update_hz = self.fixed_update_hz;
+
+                    let resp0 = ui.add(egui::Slider::new(&mut window_sec, 10..=120).text("Window (sec)"));
+
+                    let resp1 = ui.add(egui::Slider::new(&mut fixed_update_hz, 1..=120).text("Update (Hz)"));
+
+                    if window_sec != self.window_sec || fixed_update_hz != self.fixed_update_hz {
+                        ui.label("Release to update");
+
+                        if resp0.drag_stopped() || resp1.drag_stopped() {
+                            self.window_sec = window_sec;
+                            self.fixed_update_hz = fixed_update_hz;
+                            self.cpu_power = vec![0.0; window_capacity(self.window_sec, self.fixed_update_hz)];
+                            self.window_idx = 0;
+                        }
+                    }
                 });
 
                 if ui.button("Reset").clicked() {
-                    self.cpu_power = [f32::MIN; WINDOW_ELEMS];
+                    self.cpu_power = vec![0.0; window_capacity(self.window_sec, self.fixed_update_hz)];
                     self.window_idx = 0;
                     self.idle_w = f32::MAX;
                 }
@@ -140,10 +158,11 @@ impl App {
 
         egui::CentralPanel::default()
             .show(ctx, |ui| {
-                let data: egui_plot::PlotPoints = (0..WINDOW_ELEMS).map(|x| {
+                let window_elems = self.cpu_power.capacity();
+                let data: egui_plot::PlotPoints = (0..window_elems).map(|x| {
                     // Map [0,WINDOW_ELEMS) to (WINDOW_ELEMS,0]
-                    let x_inv = WINDOW_ELEMS - x - 1;
-                    let idx_offset = (x_inv + self.window_idx) % WINDOW_ELEMS;
+                    let x_inv = window_elems - x - 1;
+                    let idx_offset = (x_inv + self.window_idx) % window_elems;
                     let power = self.cpu_power[idx_offset] - self.idle_w;
                     [x as f64 / self.fixed_update_hz as f64, power as f64]
                 }).collect();
@@ -155,13 +174,19 @@ impl App {
                     .allow_zoom(false)
                     .allow_scroll(false)
                     .allow_axis_zoom_drag(false)
-                    .default_x_bounds(0f64, WINDOW_DURATION.as_secs_f64())
+                    .default_x_bounds(0f64, self.window_sec as f64)
                     .default_y_bounds(0f64, (window_max as f64 * 1.1).max(1.0))
                     .show(ui, |plot_ui| {
                         plot_ui.line(line);
                     });
             });
     }
+}
+
+fn window_capacity(window_sec: usize, fixed_update_hz: usize) -> usize {
+    // Every second gets `fixed_update_hz` many updates
+    // Both ends are inclusive, so add one
+    (window_sec * fixed_update_hz) + 1
 }
 
 fn main() -> eframe::Result {
