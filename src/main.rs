@@ -4,14 +4,6 @@ use eframe::egui;
 use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
 
-// const FIXED_UPDATE_MS: usize = 100;
-// const FIXED_UPDATE_SEC: f64 = FIXED_UPDATE_MS as f64 * 0.001;
-// const FIXED_UPDATE_DURATION: Duration = Duration::from_millis(FIXED_UPDATE_MS as u64);
-
-// const WINDOW_SEC: usize = 60;
-// const WINDOW_DURATION: Duration = Duration::from_secs(WINDOW_SEC as u64);
-// const WINDOW_ELEMS: usize = (WINDOW_SEC * 1000) / /*FIXED_UPDATE_MS*/ 10 + 1;
-
 struct App {
     file_dialog: FileDialog,
     opened_file: Option<BufWriter<File>>,
@@ -37,7 +29,7 @@ impl Default for App {
             fixed_update_hz: 10,
             window_idx: 0,
             cpu_power: vec![0.0; window_capacity(120, 10)],
-            plot_points: Vec::new(),
+            plot_points: vec![egui_plot::PlotPoint::new(0.0, 0.0); window_capacity(120, 10)],
             rapl: Rapl::now(false),
             idle_w: f32::MAX,
         }
@@ -125,6 +117,7 @@ impl App {
                             self.window_sec = window_sec;
                             self.fixed_update_hz = fixed_update_hz;
                             self.cpu_power = vec![0.0; window_capacity(self.window_sec, self.fixed_update_hz)];
+                            self.plot_points = vec![egui_plot::PlotPoint::new(0.0, 0.0); window_capacity(self.window_sec, self.fixed_update_hz)];
                             self.window_idx = 0;
                         }
                     }
@@ -132,7 +125,11 @@ impl App {
 
                 if ui.button("Reset").clicked() {
                     self.idle_w = f32::MAX;
-                    self.cpu_power = vec![0.0; window_capacity(self.window_sec, self.fixed_update_hz)];
+                    for i in 0..window_capacity(self.window_sec, self.fixed_update_hz) {
+                        self.cpu_power[i] = 0.0;
+                        self.plot_points[i].x = 0.0;
+                        self.plot_points[i].y = 0.0;
+                    }
                     self.window_idx = 0;
                 }
 
@@ -165,18 +162,14 @@ impl App {
                 // TODO: I think we can just create plot_points at the same time as cpu_power and then update in-place
                 // Then instead of splicing the array here, we might be better off just creating two lines (or combining two splices?) in `show`
 
-                self.plot_points.clear();
-                self.plot_points.reserve(window_elems);
                 for x in 0..window_elems {
                     // Map [0,window_elems) to (window_elems,0]
                     let x_inv = window_elems - x - 1;
                     let idx_offset = (x_inv + self.window_idx) % window_elems;
                     let power = self.cpu_power[idx_offset] - self.idle_w;
 
-                    self.plot_points.push(egui_plot::PlotPoint::new(
-                        x as f64 / self.fixed_update_hz as f64,
-                        power as f64,
-                    ));
+                    self.plot_points[x].x = x as f64 / self.fixed_update_hz as f64;
+                    self.plot_points[x].y = power as f64;
                 }
 
                 egui_plot::Plot::new("energy_plot")
