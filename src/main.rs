@@ -13,7 +13,7 @@ const DEFAULT_WINDOW_SEC: usize = 60;
 const DEFAULT_WINDOW_SEC: usize = 120;
 
 #[cfg(feature = "remote-x11")]
-const DEFAULT_FIXED_UPDATE_HZ: usize = 4;
+const DEFAULT_FIXED_UPDATE_HZ: usize = 6;
 #[cfg(not(feature = "remote-x11"))]
 const DEFAULT_FIXED_UPDATE_HZ: usize = 10;
 
