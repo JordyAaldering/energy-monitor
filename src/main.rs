@@ -22,7 +22,6 @@ struct App {
     file_dialog: FileDialog,
     #[cfg(feature = "file-output")]
     opened_file: Option<BufWriter<File>>,
-    last_delta: Instant,
     last_fixed: Instant,
     next_fixed_deadline: Instant,
     window_sec: usize,
@@ -34,7 +33,6 @@ struct App {
     rapl: Option<Rapl>,
     #[cfg(feature = "subtract-idle")]
     idle_w: f32,
-    frame_delta: Duration,
     measured_update_hz: f32,
 }
 
@@ -48,7 +46,6 @@ impl Default for App {
             file_dialog: FileDialog::new().allow_file_overwrite(false),
             #[cfg(feature = "file-output")]
             opened_file: None,
-            last_delta: now,
             last_fixed: now,
             next_fixed_deadline: now + fixed_update_dur,
             window_sec: DEFAULT_WINDOW_SEC,
@@ -60,7 +57,6 @@ impl Default for App {
             rapl: Rapl::new(false),
             #[cfg(feature = "subtract-idle")]
             idle_w: f32::MAX,
-            frame_delta: Duration::from_secs_f32(1.0 / 60.0),
             measured_update_hz: DEFAULT_FIXED_UPDATE_HZ as f32,
         }
     }
@@ -89,9 +85,6 @@ impl eframe::App for App {
         }
 
         let now = Instant::now();
-        let delta_time = now.duration_since(self.last_delta);
-        self.last_delta = now;
-        self.frame_delta = delta_time;
 
         if now >= self.next_fixed_deadline {
             let fixed_time = now.duration_since(self.last_fixed);
@@ -122,14 +115,14 @@ impl eframe::App for App {
                 ui.set_style(style);
 
                 ui.add_enabled_ui(false, |ui| {
-                    self.render(ui, self.frame_delta);
+                    self.render(ui);
                 });
             });
             return;
         }
 
         #[cfg(not(feature = "remote-x11"))]
-        self.render(ui, self.frame_delta);
+        self.render(ui);
     }
 }
 
@@ -161,7 +154,7 @@ impl App {
         }
     }
 
-    fn render(&mut self, ui: &mut egui::Ui, _delta_time: Duration) {
+    fn render(&mut self, ui: &mut egui::Ui) {
         #[cfg(feature = "file-output")]
         let ctx = ui.ctx().clone();
         let cpu_power_max = self.cpu_power.iter().fold(0.0, |x, y| y.max(x));
