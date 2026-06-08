@@ -33,6 +33,8 @@ struct App {
     rapl: Option<Rapl>,
     idle_w: f32,
     frame_delta: Duration,
+    #[cfg(feature = "remote-x11")]
+    next_frame_deadline: Instant,
 }
 
 impl Default for App {
@@ -53,6 +55,8 @@ impl Default for App {
             rapl: Rapl::new(false),
             idle_w: f32::MAX,
             frame_delta: Duration::ZERO,
+            #[cfg(feature = "remote-x11")]
+            next_frame_deadline: Instant::now(),
         }
     }
 }
@@ -70,6 +74,16 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let fixed_update_dur = Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
 
+        #[cfg(feature = "remote-x11")]
+        {
+        // Keep the app at a fixed cadence even when input events arrive faster
+        // (e.g. pointer motion while focused over X11 forwarding).
+        let now = Instant::now();
+        if now < self.next_frame_deadline {
+            std::thread::sleep(self.next_frame_deadline - now);
+        }
+        }
+
         let now = Instant::now();
         let delta_time = now.duration_since(self.last_delta);
         let fixed_time = now.duration_since(self.last_fixed);
@@ -80,6 +94,11 @@ impl eframe::App for App {
         if first_iteration || fixed_time >= fixed_update_dur {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
+        }
+
+        #[cfg(feature = "remote-x11")]
+        {
+            self.next_frame_deadline = now + fixed_update_dur;
         }
 
         ctx.request_repaint_after(fixed_update_dur);
@@ -94,7 +113,7 @@ impl App {
     fn fixed_update(&mut self, fixed_time: Duration) {
         if let Some(rapl) = &mut self.rapl {
             let energy = rapl.elapsed().into_values().sum::<f32>();
-            let power = energy / fixed_time.as_secs_f32();
+            let power = energy / fixed_time.as_secs_f32().max(1e-6);
 
             #[cfg(feature = "file-output")]
             if let Some(wtr) = self.opened_file.as_mut() {
