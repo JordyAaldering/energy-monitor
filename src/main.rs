@@ -2,7 +2,7 @@ use std::{f32, time::{Duration, Instant}};
 #[cfg(feature = "file-output")]
 use std::{fs::File, io::{BufWriter, Write}};
 
-use eframe::egui::{self, Vec2b};
+use eframe::egui::{self, Vec2b, ViewportBuilder};
 #[cfg(feature = "file-output")]
 use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
@@ -31,6 +31,8 @@ struct App {
     plot_points: Vec<egui_plot::PlotPoint>,
     plot_dirty: bool,
     rapl: Option<Rapl>,
+    first_iteration: bool,
+    #[cfg(feature = "subtract-idle")]
     idle_w: f32,
     frame_delta: Duration,
     #[cfg(feature = "remote-x11")]
@@ -53,6 +55,8 @@ impl Default for App {
             plot_points: Vec::new(),
             plot_dirty: true,
             rapl: Rapl::new(false),
+            first_iteration: true,
+            #[cfg(feature = "subtract-idle")]
             idle_w: f32::MAX,
             frame_delta: Duration::ZERO,
             #[cfg(feature = "remote-x11")]
@@ -94,8 +98,7 @@ impl eframe::App for App {
         self.last_delta = now;
         self.frame_delta = delta_time;
 
-        let first_iteration = self.idle_w == f32::MAX;
-        if first_iteration || fixed_time >= fixed_update_dur {
+        if fixed_time >= fixed_update_dur {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
         }
@@ -150,7 +153,10 @@ impl App {
             self.window_idx = (self.window_idx + 1) % self.cpu_power.capacity();
             self.plot_dirty = true;
 
-            self.idle_w = self.idle_w.min(power);
+            #[cfg(feature = "subtract-idle")]
+            {
+                self.idle_w = self.idle_w.min(power);
+            }
 
             rapl.reset();
         }
@@ -160,7 +166,12 @@ impl App {
         #[cfg(feature = "file-output")]
         let ctx = ui.ctx().clone();
         let cpu_power_max = self.cpu_power.iter().fold(0.0, |x, y| y.max(x));
-        let window_max = cpu_power_max - self.idle_w;
+        #[allow(unused_mut)]
+        let mut window_max = cpu_power_max;
+        #[cfg(feature = "subtract-idle")]
+        {
+            window_max -= self.idle_w;
+        }
 
         #[cfg(not(feature = "remote-x11"))]
         egui::Panel::top("menu_bar").show_inside(ui, |ui| {
@@ -203,12 +214,17 @@ impl App {
                 });
 
                 if ui.button("Reset").clicked() {
-                    self.idle_w = f32::MAX;
+                    #[cfg(feature = "subtract-idle")]
+                    {
+                        self.idle_w = f32::MAX;
+                    }
+
                     for i in 0..window_capacity(self.window_sec, self.fixed_update_hz) {
                         self.cpu_power[i] = 0.0;
                     }
-                    self.plot_points.clear();
+
                     self.window_idx = 0;
+                    self.plot_points.clear();
                     self.plot_dirty = true;
                 }
 
@@ -232,12 +248,14 @@ impl App {
             }
         }
 
+        #[cfg(not(feature = "remote-x11"))]
         egui::Panel::bottom("stats_bar").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.label(format!("Found {} RAPL packages", self.rapl.as_ref().map_or(0, |rapl| rapl.packages.len())));
 
                 ui.separator();
 
+                #[cfg(feature = "subtract-idle")]
                 ui.label(format!("Idle: {:.1}W", self.idle_w));
             });
         });
@@ -259,7 +277,12 @@ impl App {
                         // Map [0,window_elems) to (window_elems,0]
                         let x_inv = window_elems - x - 1;
                         let idx_offset = (x_inv + self.window_idx) % window_elems;
-                        let power = self.cpu_power[idx_offset] - self.idle_w;
+                        #[allow(unused_mut)]
+                        let mut power = self.cpu_power[idx_offset];
+                        #[cfg(feature = "subtract-idle")]
+                        {
+                            power -= self.idle_w;
+                        }
 
                         self.plot_points.push(egui_plot::PlotPoint::new(
                             x as f64 / self.fixed_update_hz as f64,
@@ -320,6 +343,8 @@ fn main() -> eframe::Result {
     #[allow(unused_mut)]
     let mut native_options = eframe::NativeOptions {
         vsync: true,
+        viewport: ViewportBuilder::default()
+            .with_inner_size((1280.0, 720.0)),
         ..Default::default()
     };
 
@@ -328,7 +353,6 @@ fn main() -> eframe::Result {
         native_options.vsync = false;
         native_options.multisampling = 0;
         native_options.hardware_acceleration = eframe::HardwareAcceleration::Off;
-        //native_options.renderer = eframe::Renderer::Glow;
     }
 
     eframe::run_native(

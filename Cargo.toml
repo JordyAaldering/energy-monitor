@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["file-output"]
 file-output = ["dep:egui-file-dialog"]
+subtract-idle = []
 remote-x11 = []
 
 [profile.release]
