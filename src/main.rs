@@ -2,7 +2,7 @@ use std::{f32, time::{Duration, Instant}};
 #[cfg(feature = "file-output")]
 use std::{fs::File, io::{BufWriter, Write}};
 
-use eframe::egui;
+use eframe::egui::{self, Vec2b};
 #[cfg(feature = "file-output")]
 use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
@@ -76,12 +76,16 @@ impl eframe::App for App {
 
         #[cfg(feature = "remote-x11")]
         {
-        // Keep the app at a fixed cadence even when input events arrive faster
-        // (e.g. pointer motion while focused over X11 forwarding).
-        let now = Instant::now();
-        if now < self.next_frame_deadline {
-            std::thread::sleep(self.next_frame_deadline - now);
-        }
+            let now = Instant::now();
+            if now < self.next_frame_deadline {
+                // Ignore high-frequency pointer/input events between scheduled frames.
+                ctx.input_mut(|input| input.events.clear());
+                ctx.request_repaint_after(self.next_frame_deadline - now);
+                return;
+            }
+
+            // Ignore all input in remote mode to prevent event storms from driving redraws.
+            ctx.input_mut(|input| input.events.clear());
         }
 
         let now = Instant::now();
@@ -98,9 +102,14 @@ impl eframe::App for App {
 
         #[cfg(feature = "remote-x11")]
         {
-            self.next_frame_deadline = now + fixed_update_dur;
+            while self.next_frame_deadline <= now {
+                self.next_frame_deadline += fixed_update_dur;
+            }
+            ctx.request_repaint_after(self.next_frame_deadline - now);
+            return;
         }
 
+        #[cfg(not(feature = "remote-x11"))]
         ctx.request_repaint_after(fixed_update_dur);
     }
 
@@ -136,6 +145,7 @@ impl App {
         let cpu_power_max = self.cpu_power.iter().fold(0.0, |x, y| y.max(x));
         let window_max = cpu_power_max - self.idle_w;
 
+        #[cfg(not(feature = "remote-x11"))]
         egui::Panel::top("menu_bar").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 egui::global_theme_preference_switch(ui);
@@ -191,6 +201,11 @@ impl App {
             });
         });
 
+        #[cfg(feature = "remote-x11")]
+        {
+            let _ = delta_time;
+        }
+
         #[cfg(feature = "file-output")]
         {
             self.file_dialog.update(&ctx);
@@ -239,10 +254,17 @@ impl App {
                 }
 
                 egui_plot::Plot::new("energy_plot")
+                    .sense(egui::Sense::empty())
                     .allow_drag(false)
                     .allow_zoom(false)
                     .allow_scroll(false)
+                    .allow_double_click_reset(false)
+                    .allow_boxed_zoom(false)
                     .allow_axis_zoom_drag(false)
+                    .show_x(false)
+                    .show_y(false)
+                    .show_crosshair(false)
+                    .show_grid(Vec2b::new(false, true))
                     .auto_bounds(false)
                     .show(ui, |plot_ui| {
                         let ymax = (window_max as f64 * 1.1).max(1.0);
@@ -253,7 +275,7 @@ impl App {
                         plot_ui.set_plot_bounds(bounds);
 
                         let points = egui_plot::PlotPoints::Borrowed(&self.plot_points);
-                        plot_ui.line(egui_plot::Line::new("energy_line", points));
+                        plot_ui.line(egui_plot::Line::new("energy_line", points).allow_hover(false));
                     });
             });
     }
