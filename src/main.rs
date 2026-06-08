@@ -98,7 +98,7 @@ impl eframe::App for App {
         self.last_delta = now;
         self.frame_delta = delta_time;
 
-        if fixed_time >= fixed_update_dur {
+        if self.first_iteration || fixed_time >= fixed_update_dur {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
         }
@@ -214,6 +214,8 @@ impl App {
                 });
 
                 if ui.button("Reset").clicked() {
+                    self.first_iteration = true;
+
                     #[cfg(feature = "subtract-idle")]
                     {
                         self.idle_w = f32::MAX;
