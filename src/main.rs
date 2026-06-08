@@ -2,7 +2,11 @@ use std::{f32, time::{Duration, Instant}};
 #[cfg(feature = "file-output")]
 use std::{fs::File, io::{BufWriter, Write}};
 
-use eframe::egui::{self, Vec2b};
+use eframe::egui;
+#[cfg(feature = "remote-x11")]
+use eframe::egui::{Color32, Pos2, Stroke};
+#[cfg(not(feature = "remote-x11"))]
+use eframe::egui::Vec2b;
 #[cfg(feature = "file-output")]
 use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
@@ -253,6 +257,13 @@ impl App {
                     self.plot_dirty = false;
                 }
 
+                #[cfg(feature = "remote-x11")]
+                {
+                    self.render_remote_plot(ui, window_max);
+                    return;
+                }
+
+                #[cfg(not(feature = "remote-x11"))]
                 egui_plot::Plot::new("energy_plot")
                     .sense(egui::Sense::empty())
                     .allow_drag(false)
@@ -278,6 +289,40 @@ impl App {
                         plot_ui.line(egui_plot::Line::new("energy_line", points).allow_hover(false));
                     });
             });
+    }
+
+    #[cfg(feature = "remote-x11")]
+    fn render_remote_plot(&self, ui: &mut egui::Ui, window_max: f32) {
+        let desired_size = ui.available_size_before_wrap();
+        let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::empty());
+        let painter = ui.painter_at(rect);
+
+        // Draw a simple static chart surface with no widget-level interaction.
+        painter.rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
+
+        let ymax = (window_max as f64 * 1.1).max(1.0);
+        let x_max = self.window_sec as f64;
+        if self.plot_points.len() < 2 || x_max <= 0.0 {
+            return;
+        }
+
+        let mut points = Vec::with_capacity(self.plot_points.len());
+        for p in &self.plot_points {
+            let tx = (p.x / x_max).clamp(0.0, 1.0) as f32;
+            let ty = (p.y / ymax).clamp(0.0, 1.0) as f32;
+            let x = egui::lerp(rect.left()..=rect.right(), tx);
+            let y = egui::lerp(rect.bottom()..=rect.top(), ty);
+            points.push(Pos2::new(x, y));
+        }
+
+        let line_color = ui.visuals().widgets.active.fg_stroke.color;
+        painter.add(egui::Shape::line(points, Stroke::new(1.5, line_color)));
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, Color32::from_gray(90)),
+            egui::StrokeKind::Outside,
+        );
     }
 }
 
