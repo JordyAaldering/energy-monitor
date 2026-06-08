@@ -35,18 +35,22 @@ struct App {
     #[cfg(feature = "subtract-idle")]
     idle_w: f32,
     frame_delta: Duration,
+    measured_update_hz: f32,
 }
 
 impl Default for App {
     fn default() -> Self {
+        let now = Instant::now();
+        let fixed_update_dur = Duration::from_secs_f32(1.0 / DEFAULT_FIXED_UPDATE_HZ as f32);
+
         Self {
             #[cfg(feature = "file-output")]
             file_dialog: FileDialog::new().allow_file_overwrite(false),
             #[cfg(feature = "file-output")]
             opened_file: None,
-            last_delta: Instant::now(),
-            last_fixed: Instant::now(),
-            next_fixed_deadline: Instant::now(),
+            last_delta: now,
+            last_fixed: now,
+            next_fixed_deadline: now + fixed_update_dur,
             window_sec: DEFAULT_WINDOW_SEC,
             fixed_update_hz: DEFAULT_FIXED_UPDATE_HZ,
             window_idx: 0,
@@ -56,7 +60,8 @@ impl Default for App {
             rapl: Rapl::new(false),
             #[cfg(feature = "subtract-idle")]
             idle_w: f32::MAX,
-            frame_delta: Duration::ZERO,
+            frame_delta: Duration::from_secs_f32(1.0 / 60.0),
+            measured_update_hz: DEFAULT_FIXED_UPDATE_HZ as f32,
         }
     }
 }
@@ -93,12 +98,17 @@ impl eframe::App for App {
             self.last_fixed = now;
             self.fixed_update(fixed_time);
 
-            while self.next_fixed_deadline <= now {
-                self.next_fixed_deadline += fixed_update_dur;
-            }
+            // Rebase from "now" to avoid bursty catch-up updates after jitter.
+            self.next_fixed_deadline = now + fixed_update_dur;
         }
 
-        ctx.request_repaint_after(self.next_fixed_deadline.saturating_duration_since(now));
+        // Compute delay from a fresh timestamp so render time in this frame does not
+        // collapse the requested sleep and cause repaint bursts.
+        let repaint_after = self
+            .next_fixed_deadline
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(1));
+        ctx.request_repaint_after(repaint_after);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -126,8 +136,12 @@ impl eframe::App for App {
 impl App {
     fn fixed_update(&mut self, fixed_time: Duration) {
         if let Some(rapl) = &mut self.rapl {
+            let dt = fixed_time.as_secs_f32().max(1e-6);
+            let instant_hz = 1.0 / dt;
+            self.measured_update_hz = self.measured_update_hz * 0.9 + instant_hz * 0.1;
+
             let energy = rapl.elapsed().into_values().sum::<f32>();
-            let power = energy / fixed_time.as_secs_f32().max(1e-6);
+            let power = energy / dt;
 
             #[cfg(feature = "file-output")]
             if let Some(wtr) = self.opened_file.as_mut() {
@@ -135,7 +149,7 @@ impl App {
             }
 
             self.cpu_power[self.window_idx] = power;
-            self.window_idx = (self.window_idx + 1) % self.cpu_power.capacity();
+            self.window_idx = (self.window_idx + 1) % self.cpu_power.len();
             self.plot_dirty = true;
 
             #[cfg(feature = "subtract-idle")]
@@ -147,7 +161,7 @@ impl App {
         }
     }
 
-    fn render(&mut self, ui: &mut egui::Ui, delta_time: Duration) {
+    fn render(&mut self, ui: &mut egui::Ui, _delta_time: Duration) {
         #[cfg(feature = "file-output")]
         let ctx = ui.ctx().clone();
         let cpu_power_max = self.cpu_power.iter().fold(0.0, |x, y| y.max(x));
@@ -196,6 +210,7 @@ impl App {
                             self.plot_dirty = true;
                             self.last_fixed = Instant::now();
                             self.next_fixed_deadline = self.last_fixed + Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
+                            self.measured_update_hz = self.fixed_update_hz as f32;
                         }
                     }
                 });
@@ -215,18 +230,14 @@ impl App {
                     self.plot_dirty = true;
                     self.last_fixed = Instant::now();
                     self.next_fixed_deadline = self.last_fixed + Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
+                    self.measured_update_hz = self.fixed_update_hz as f32;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:.0} FPS", 1.0 / delta_time.as_secs_f32()));
+                    ui.label(format!("{:.1} Hz", self.measured_update_hz));
                 });
             });
         });
-
-        #[cfg(feature = "remote-x11")]
-        {
-            let _ = delta_time;
-        }
 
         #[cfg(feature = "file-output")]
         {
@@ -256,13 +267,10 @@ impl App {
                 if self.plot_dirty {
                     self.plot_points.clear();
 
-                    // Render at roughly one sample per horizontal pixel, with a lower density in remote mode.
-                    let max_points = dynamic_max_render_points(ui.available_width(), window_elems);
-                    let stride = (window_elems / max_points).max(1);
-                    let point_count = window_elems.div_ceil(stride);
-                    self.plot_points.reserve(point_count.saturating_sub(self.plot_points.capacity()));
+                    // Keep one plotted point per stored sample so the line is stable across updates.
+                    self.plot_points.reserve(window_elems.saturating_sub(self.plot_points.capacity()));
 
-                    for x in (0..window_elems).step_by(stride) {
+                    for x in 0..window_elems {
                         // Map [0,window_elems) to (window_elems,0]
                         let x_inv = window_elems - x - 1;
                         let idx_offset = (x_inv + self.window_idx) % window_elems;
@@ -315,17 +323,6 @@ fn window_capacity(window_sec: usize, fixed_update_hz: usize) -> usize {
     // Every second gets `fixed_update_hz` many updates
     // Both ends are inclusive, so add one
     (window_sec * fixed_update_hz) + 1
-}
-
-#[inline(always)]
-fn dynamic_max_render_points(plot_width_px: f32, window_elems: usize) -> usize {
-    #[cfg(feature = "remote-x11")]
-    let pixels_per_point = 2.0;
-    #[cfg(not(feature = "remote-x11"))]
-    let pixels_per_point = 1.0;
-
-    let approx = (plot_width_px / pixels_per_point).floor() as usize;
-    approx.clamp(64, window_elems.max(64))
 }
 
 fn main() -> eframe::Result {
