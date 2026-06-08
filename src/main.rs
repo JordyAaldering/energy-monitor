@@ -114,6 +114,23 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(feature = "remote-x11")]
+        {
+            ui.scope(|ui| {
+                let mut style: egui::Style = ui.style().as_ref().clone();
+                // Keep the no-input behavior from disabled UI without visually dimming the app.
+                style.visuals.widgets.noninteractive = style.visuals.widgets.inactive;
+                style.visuals.disabled_alpha = 1.0;
+                ui.set_style(style);
+
+                ui.add_enabled_ui(false, |ui| {
+                    self.render(ui, self.frame_delta);
+                });
+            });
+            return;
+        }
+
+        #[cfg(not(feature = "remote-x11"))]
         self.render(ui, self.frame_delta);
     }
 }
