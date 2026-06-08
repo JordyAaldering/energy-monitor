@@ -2,7 +2,7 @@ use std::{f32, time::{Duration, Instant}};
 #[cfg(feature = "file-output")]
 use std::{fs::File, io::{BufWriter, Write}};
 
-use eframe::egui::{self, Vec2b, ViewportBuilder};
+use eframe::egui;
 #[cfg(feature = "file-output")]
 use egui_file_dialog::FileDialog;
 use rapl_energy::Rapl;
@@ -24,6 +24,7 @@ struct App {
     opened_file: Option<BufWriter<File>>,
     last_delta: Instant,
     last_fixed: Instant,
+    next_fixed_deadline: Instant,
     window_sec: usize,
     fixed_update_hz: usize,
     window_idx: usize,
@@ -31,12 +32,9 @@ struct App {
     plot_points: Vec<egui_plot::PlotPoint>,
     plot_dirty: bool,
     rapl: Option<Rapl>,
-    first_iteration: bool,
     #[cfg(feature = "subtract-idle")]
     idle_w: f32,
     frame_delta: Duration,
-    #[cfg(feature = "remote-x11")]
-    next_frame_deadline: Instant,
 }
 
 impl Default for App {
@@ -48,6 +46,7 @@ impl Default for App {
             opened_file: None,
             last_delta: Instant::now(),
             last_fixed: Instant::now(),
+            next_fixed_deadline: Instant::now(),
             window_sec: DEFAULT_WINDOW_SEC,
             fixed_update_hz: DEFAULT_FIXED_UPDATE_HZ,
             window_idx: 0,
@@ -55,12 +54,9 @@ impl Default for App {
             plot_points: Vec::new(),
             plot_dirty: true,
             rapl: Rapl::new(false),
-            first_iteration: true,
             #[cfg(feature = "subtract-idle")]
             idle_w: f32::MAX,
             frame_delta: Duration::ZERO,
-            #[cfg(feature = "remote-x11")]
-            next_frame_deadline: Instant::now(),
         }
     }
 }
@@ -77,43 +73,32 @@ impl Drop for App {
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let fixed_update_dur = Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
+        if self.next_fixed_deadline <= self.last_fixed {
+            self.next_fixed_deadline = self.last_fixed + fixed_update_dur;
+        }
 
         #[cfg(feature = "remote-x11")]
         {
-            let now = Instant::now();
-            if now < self.next_frame_deadline {
-                // Ignore high-frequency pointer/input events between scheduled frames.
-                ctx.input_mut(|input| input.events.clear());
-                ctx.request_repaint_after(self.next_frame_deadline - now);
-                return;
-            }
-
             // Ignore all input in remote mode to prevent event storms from driving redraws.
             ctx.input_mut(|input| input.events.clear());
         }
 
         let now = Instant::now();
         let delta_time = now.duration_since(self.last_delta);
-        let fixed_time = now.duration_since(self.last_fixed);
         self.last_delta = now;
         self.frame_delta = delta_time;
 
-        if self.first_iteration || fixed_time >= fixed_update_dur {
+        if now >= self.next_fixed_deadline {
+            let fixed_time = now.duration_since(self.last_fixed);
             self.last_fixed = now;
             self.fixed_update(fixed_time);
-        }
 
-        #[cfg(feature = "remote-x11")]
-        {
-            while self.next_frame_deadline <= now {
-                self.next_frame_deadline += fixed_update_dur;
+            while self.next_fixed_deadline <= now {
+                self.next_fixed_deadline += fixed_update_dur;
             }
-            ctx.request_repaint_after(self.next_frame_deadline - now);
-            return;
         }
 
-        #[cfg(not(feature = "remote-x11"))]
-        ctx.request_repaint_after(fixed_update_dur);
+        ctx.request_repaint_after(self.next_fixed_deadline.saturating_duration_since(now));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -209,13 +194,13 @@ impl App {
                             self.plot_points.clear();
                             self.window_idx = 0;
                             self.plot_dirty = true;
+                            self.last_fixed = Instant::now();
+                            self.next_fixed_deadline = self.last_fixed + Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
                         }
                     }
                 });
 
                 if ui.button("Reset").clicked() {
-                    self.first_iteration = true;
-
                     #[cfg(feature = "subtract-idle")]
                     {
                         self.idle_w = f32::MAX;
@@ -228,6 +213,8 @@ impl App {
                     self.window_idx = 0;
                     self.plot_points.clear();
                     self.plot_dirty = true;
+                    self.last_fixed = Instant::now();
+                    self.next_fixed_deadline = self.last_fixed + Duration::from_secs_f32(1.0 / self.fixed_update_hz as f32);
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -306,7 +293,7 @@ impl App {
                     .show_x(false)
                     .show_y(false)
                     .show_crosshair(false)
-                    .show_grid(Vec2b::new(false, true))
+                    .show_grid(egui::Vec2b::new(false, true))
                     .auto_bounds(false)
                     .show(ui, |plot_ui| {
                         let ymax = (window_max as f64 * 1.1).max(1.0);
@@ -345,7 +332,7 @@ fn main() -> eframe::Result {
     #[allow(unused_mut)]
     let mut native_options = eframe::NativeOptions {
         vsync: true,
-        viewport: ViewportBuilder::default()
+        viewport: egui::ViewportBuilder::default()
             .with_inner_size((1280.0, 720.0)),
         ..Default::default()
     };
@@ -360,7 +347,12 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Energy Monitor",
         native_options,
-        Box::new(|_| {
+        Box::new(|creation_context| {
+            let style = egui::Style {
+                visuals: egui::Visuals::light(),
+                ..Default::default()
+            };
+            creation_context.egui_ctx.set_global_style(style);
             Ok(Box::<App>::default())
         }),
     )

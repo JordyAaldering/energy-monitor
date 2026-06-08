@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["file-output"]
+default = ["file-output", "subtract-idle"]
 file-output = ["dep:egui-file-dialog"]
 subtract-idle = []
 remote-x11 = []
